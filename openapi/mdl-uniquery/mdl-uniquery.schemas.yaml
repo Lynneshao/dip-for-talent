@@ -648,10 +648,12 @@ components:
       properties:
         method:
           description: 计算方法，增长值或增长率
-          enum:
-          - growth_value
-          - growth_rate
-          type: string
+          type: array
+          items:
+            type: string
+            enum:
+            - growth_value
+            - growth_rate
         offset:
           description: 偏移量
           type: integer
