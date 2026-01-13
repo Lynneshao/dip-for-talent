@@ -25,15 +25,14 @@ import { Copilot, type ApplicationContext } from "@kweaver-ai/chatkit";
 
 const { Title, Text } = Typography;
 
-const apiBase = import.meta.env.VITE_API_BASE ?? "/api";
-const DIP_TOKEN = import.meta.env.VITE_DIP_TOKEN ?? "";
-const API_AUTHORIZATION = DIP_TOKEN ? `Bearer ${DIP_TOKEN}` : "";
+const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const DEFAULT_TOKEN = import.meta.env.VITE_DIP_TOKEN ?? "";
 const CHATKIT_BASE_URL =
   import.meta.env.VITE_DIP_CHATKIT_BASE_URL ?? "/api/agent-app/v1";
 const CHATKIT_AGENT_ID =
   import.meta.env.VITE_DIP_CHATKIT_AGENT_ID ??
   "01KCNETG4CKP5TVRJ7KHNRN3KV";
-const CHATKIT_TOKEN = DIP_TOKEN;
+const DEFAULT_CHATKIT_TOKEN = DEFAULT_TOKEN;
 const CHATKIT_BUSINESS_DOMAIN =
   import.meta.env.VITE_DIP_CHATKIT_BUSINESS_DOMAIN ?? "bd_public";
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -294,6 +293,8 @@ const buildMetricQuery = (withGrowth: boolean) => ({
 });
 
 const fetchMetricResults = async (
+  apiBase: string,
+  authorization: string,
   ids: string[],
   withGrowth: boolean
 ): Promise<
@@ -312,7 +313,7 @@ const fetchMetricResults = async (
       headers: {
         "Content-Type": "application/json",
         "X-HTTP-Method-Override": "GET",
-        ...(API_AUTHORIZATION ? { Authorization: API_AUTHORIZATION } : {})
+        ...(authorization ? { Authorization: authorization } : {})
       },
       body: JSON.stringify(body)
     }
@@ -339,14 +340,17 @@ const fetchMetricResults = async (
   });
 };
 
-const fetchRoiSummary = async (): Promise<RoiSummary> => {
+const fetchRoiSummary = async (
+  apiBase: string,
+  authorization: string
+): Promise<RoiSummary> => {
   const currentIds = ROI_METRIC_CONFIG.map((metric) => metric.modelId);
   const benchmarkIds = ROI_METRIC_CONFIG.map(
     (metric) => metric.benchmarkModelId
   );
   const [currentResults, benchmarkResults] = await Promise.all([
-    fetchMetricResults(currentIds, true),
-    fetchMetricResults(benchmarkIds, false)
+    fetchMetricResults(apiBase, authorization, currentIds, true),
+    fetchMetricResults(apiBase, authorization, benchmarkIds, false)
   ]);
 
   const metrics: RoiMetric[] = ROI_METRIC_CONFIG.map((config, index) => {
@@ -388,14 +392,17 @@ const fetchRoiSummary = async (): Promise<RoiSummary> => {
   };
 };
 
-const fetchScoreSummary = async (): Promise<ScoreResponse> => {
+const fetchScoreSummary = async (
+  apiBase: string,
+  authorization: string
+): Promise<ScoreResponse> => {
   const currentIds = SCORE_METRIC_CONFIG.map((metric) => metric.modelId);
   const benchmarkIds = SCORE_METRIC_CONFIG.map(
     (metric) => metric.benchmarkModelId
   );
   const [currentResults, benchmarkResults] = await Promise.all([
-    fetchMetricResults(currentIds, false),
-    fetchMetricResults(benchmarkIds, false)
+    fetchMetricResults(apiBase, authorization, currentIds, false),
+    fetchMetricResults(apiBase, authorization, benchmarkIds, false)
   ]);
 
   const metrics: ScoreMetric[] = SCORE_METRIC_CONFIG.map((config, index) => {
@@ -453,7 +460,26 @@ const buildContext = (context: ChatContext): ApplicationContext => {
   };
 };
 
-const App = () => {
+type AppProps = {
+  basename?: string;
+  token?: {
+    accessToken: string;
+    refreshToken: () => Promise<{ accessToken: string }>;
+    onTokenExpired?: (code?: number) => void;
+  };
+  user?: {
+    id: string;
+    vision_name: string;
+    account: string;
+  };
+  setMicroAppState?: (state: Record<string, any>) => boolean;
+  onMicroAppStateChange?: (
+    callback: (state: any, prev: any) => void,
+    fireImmediately?: boolean
+  ) => () => void;
+};
+
+const App = ({ token, setMicroAppState, onMicroAppStateChange }: AppProps) => {
   const [summary, setSummary] = useState<RoiSummary | null>(null);
   const [orgTree, setOrgTree] = useState<OrgTreeResponse | null>(null);
   const [score, setScore] = useState<ScoreResponse | null>(null);
@@ -466,6 +492,35 @@ const App = () => {
   const [chatContext, setChatContext] = useState<ChatContext | null>(null);
   const hasLoadedRef = useRef(false);
   const chatKitRef = useRef<Copilot>(null);
+  const apiBase = DEFAULT_API_BASE;
+  const accessToken = token?.accessToken ?? DEFAULT_TOKEN;
+  const authorization = accessToken ? `Bearer ${accessToken}` : "";
+  const chatkitToken = accessToken || DEFAULT_CHATKIT_TOKEN;
+
+  useEffect(() => {
+    if (!onMicroAppStateChange) return;
+    const unsubscribe = onMicroAppStateChange(
+      (state, prev) => {
+        if (state?.language !== prev?.language) {
+          console.log("全局状态变化:", state, prev);
+        }
+      },
+      true
+    );
+    return () => {
+      unsubscribe();
+    };
+  }, [onMicroAppStateChange]);
+
+  useEffect(() => {
+    if (!setMicroAppState) return;
+    setMicroAppState({
+      breadcrumb: [
+        { name: "人力资本 ROI 分析", path: "/" },
+        { name: "人才洞察与ROI决策工作台", path: "/" }
+      ]
+    });
+  }, [setMicroAppState]);
 
   useEffect(() => {
     if (hasLoadedRef.current) {
@@ -475,8 +530,8 @@ const App = () => {
     const loadData = async () => {
       try {
         const [summaryRes, scoreRes] = await Promise.all([
-          fetchRoiSummary(),
-          fetchScoreSummary()
+          fetchRoiSummary(apiBase, authorization),
+          fetchScoreSummary(apiBase, authorization)
         ]);
         setSummary(summaryRes);
         setScore(scoreRes);
@@ -820,7 +875,7 @@ const App = () => {
           }}
           baseUrl={CHATKIT_BASE_URL}
           agentId={CHATKIT_AGENT_ID}
-          token={CHATKIT_TOKEN}
+          token={chatkitToken}
           businessDomain={CHATKIT_BUSINESS_DOMAIN}
         />
       </div>

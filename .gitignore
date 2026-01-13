@@ -1,5 +1,8 @@
 .venv/
+.dip-cache/
 node_modules/
+devkit/
+dist/
 
 .DS_Store
 *.log
